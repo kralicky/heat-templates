@@ -1,0 +1,152 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  name:
+    type: string
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+  image:
+    type: string
+    default: "Ubuntu 21.04"
+  flavor:
+    type: string
+    default: a3.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  network_id:
+    type: string
+  subnet_id:
+    type: string
+  
+
+resources:
+  control_plane:
+    type: OS::Nova::Server
+    properties:
+      name: 
+        str_replace:
+          template: "%name%-control-plane"
+          params:
+            "%name%": { get_param: name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: control_plane_port }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_resource: kubeadm_config }
+  control_plane_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: network_id }
+      fixed_ips:
+        - subnet_id: { get_param: subnet_id }
+  control_plane_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: public
+      port_id: { get_resource: control_plane_port }
+
+  kubeconfig_handle:
+    type: OS::Heat::WaitConditionHandle
+  kubeconfig_wc:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: kubeconfig_handle }
+      count: 1
+      timeout: 300
+  token_handle:
+    type: OS::Heat::WaitConditionHandle
+  token_wc:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: token_handle }
+      count: 1
+      timeout: 300
+  cert_hash_handle:
+    type: OS::Heat::WaitConditionHandle
+  cert_hash_wc:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: cert_hash_handle }
+      count: 1
+      timeout: 300
+
+  kubeadm_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: ungrouped
+      config:
+        str_replace:
+          template: |
+            #!/bin/bash -x
+
+            apt update && apt -y upgrade
+
+            cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+            br_netfilter
+            EOF
+
+            cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+            net.bridge.bridge-nf-call-ip6tables = 1
+            net.bridge.bridge-nf-call-iptables = 1
+            EOF
+
+            sudo sysctl --system
+            modprobe br_netfilter
+            echo 1 > /proc/sys/net/ipv4/ip_forward
+
+            apt install -y apt-transport-https ca-certificates curl jq
+            curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+            echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+            apt update
+            apt install -y containerd
+            apt install -y kubelet kubeadm kubectl
+
+            mkdir -p /tmp/patches
+            cat <<EOF | tee /tmp/patches/kube-apiserver+strategic.yaml
+            spec:
+              containers:
+              - name: kube-apiserver
+                args:
+                - --v=5
+            EOF
+            cat <<EOF | tee /tmp/patches/kube-controller-manager+strategic.yaml
+            spec:
+              containers:
+              - name: kube-controller-manager
+                args:
+                - --v=5
+            EOF
+            cat <<EOF | tee /tmp/patches/kube-scheduler+strategic.yaml
+            spec:
+              containers:
+              - name: kube-scheduler
+                args:
+                - --v=5
+            EOF
+
+            kubeadm init --apiserver-advertise-address=0.0.0.0 --apiserver-cert-extra-sans=%floating_ip% --control-plane-endpoint=%floating_ip% --feature-gates=IPv6DualStack=false --pod-network-cidr=10.244.0.0/16 --patches=/tmp/patches
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+            wc_notify_token --data $(TOKEN=$(kubeadm token list -o json | jq -r '.token') jq -Mcn '{"status": "SUCCESS", "data": env.TOKEN}')
+            wc_notify_kc --data $(KC=$(cat /etc/kubernetes/admin.conf | sed 's|https://.*:6443|https://%floating_ip%:6443|' | base64 -w0) jq -Mcn '{"status": "SUCCESS", "data": env.KC}')
+            wc_notify_cert_hash --data $(HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //') jq -Mcn '{"status": "SUCCESS", "data": env.HASH}')
+          params:
+            "%floating_ip%": { get_attr: [control_plane_floating_ip, floating_ip_address] }
+            wc_notify_token: { get_attr: [token_handle, curl_cli] }
+            wc_notify_cert_hash: { get_attr: [cert_hash_handle, curl_cli] }
+            wc_notify_kc: { get_attr: [kubeconfig_handle, curl_cli] }
+
+outputs:
+  floating_ip: 
+    value: { get_attr: [control_plane_floating_ip, floating_ip_address] }
+  internal_ip: 
+    value: { get_attr: [control_plane, first_address] }
+  token:
+    value: { get_attr: [token_wc, data] }
+  cert_hash:
+    value: { get_attr: [cert_hash_wc, data] }
+  kubeconfig:
+    value: { get_attr: [kubeconfig_wc, data] }

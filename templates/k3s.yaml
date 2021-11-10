@@ -41,15 +41,19 @@ parameters:
   num_workers:
     type: number
     description: Number of worker nodes
-    default: 1
+    default: 3
   num_vgpu:
     type: number
     description: Number of VGPU nodes
-    default: 1
+    default: 0
+  num_gpu:
+    type: number
+    description: Number of GPU Passthrough nodes
+    default: 0
   dns_nameserver:
     type: string
     description: DNS nameserver to use for private network
-    default: "10.200.1.5"
+    default: "10.200.138.13"
 
 resources:
   # network
@@ -136,7 +140,7 @@ resources:
     properties:
       handle: { get_resource: kubeconfig_handle }
       count: 1
-      timeout: 60
+      timeout: 120
   k3s_token:
     type: OS::Heat::RandomString
     properties:
@@ -148,9 +152,10 @@ resources:
       config:
         str_replace:
           template: |
-            #!/bin/sh -x
-            curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=testing sh -s - server \
-              --token=$token --write-kubeconfig-mode=644 --tls-san=$control_plane_ip
+            #!/bin/bash -x
+            curl -sfL https://get.k3s.io | INSTALL_K3S_COMMIT=702fe24afe3f08f96ebc167313c20c0339a5510f sh -s - server \
+              --token=$token --write-kubeconfig-mode=644 --tls-san=$control_plane_ip \
+              --kube-scheduler-arg=v=2 --log=/var/log/k3s.log --alsologtostderr
             kubeconfig="$(cat /etc/rancher/k3s/k3s.yaml | base64 -w0)"
             echo "{\"status\": \"SUCCESS\", \"data\": \"${kubeconfig}\"}" > /tmp/response
             wc_notify -d @/tmp/response
@@ -167,10 +172,10 @@ resources:
       config:
         str_replace:
           template: |
-            #!/bin/sh -x
-            curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=testing sh -s - agent \
-              --server=https://$control_plane_ip:6443 \
-              --token=$token
+            #!/bin/bash -x
+            curl -sfL https://get.k3s.io | INSTALL_K3S_COMMIT=702fe24afe3f08f96ebc167313c20c0339a5510f sh -s - agent \
+              --server=https://$control_plane_ip:6443 --kubelet-arg=v=2 --log=/var/log/k3s.log \
+              --alsologtostderr --token=$token
           params:
             $token: { get_attr: [k3s_token, value] }
             $control_plane_ip: { get_attr: [control_plane, first_address] }

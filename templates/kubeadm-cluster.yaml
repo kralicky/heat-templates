@@ -1,0 +1,93 @@
+heat_template_version: 2021-04-16
+
+description: Creates an unprovisioned set of servers in an isolated VPC
+
+parameters:
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+    default: joe
+  control_plane_image:
+    type: string
+    default: "Ubuntu 21.04"
+  agent_image:
+    type: string
+    default: "Ubuntu 21.04"
+  vgpu_image:
+    type: string
+    default: "Ubuntu 20.04"
+  control_plane_flavor:
+    type: string
+    default: a3.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  agent_flavor:
+    type: string
+    default: a3.4xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  vgpu_flavor:
+    type: string
+    default: v4.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  public_net:
+    type: string
+    default: "public"
+  num_workers:
+    type: number
+    default: 3
+  num_vgpu:
+    type: number
+    default: 1
+  dns_nameserver:
+    type: string
+    description: DNS nameserver to use for private network
+    default: "10.200.138.13"
+
+resources:
+  private_network:
+    type: Custom::PrivateNetwork
+    properties:
+      dns_nameserver: { get_param: dns_nameserver }
+
+  control_plane:
+    type: Clusters::Kubeadm::ControlPlane
+    properties:
+      name: { get_param: OS::stack_name }
+      image: { get_param: control_plane_image }
+      flavor: { get_param: control_plane_flavor }
+      key_name: { get_param: key_name }
+      network_id: { get_attr: [private_network, network_id] }
+      subnet_id: { get_attr: [private_network, subnet_id] }
+
+  kubeadm_worker_config:
+    type: Clusters::Kubeadm::WorkerConfig
+    properties:
+      control_plane_ip: { get_attr: [control_plane, internal_ip] }
+      token: { get_attr: [control_plane, token] }
+      cert_hash: { get_attr: [control_plane, cert_hash] }
+
+  # agents
+  agents_group:
+    type: Custom::NodeGroup
+    properties:
+      name: 
+        str_replace:
+          template: "%name%-worker-%index%"
+          params:
+            "%name%": { get_param: OS::stack_name }
+      count: { get_param: num_workers }
+      image: { get_param: agent_image }
+      flavor: { get_param: agent_flavor }
+      key_name: { get_param: key_name }
+      network: { get_resource: private_network }
+      volumes: 2
+      volume_size: 32
+      software_config: { get_resource: kubeadm_worker_config }
+
+outputs:
+  control_plane_ip:
+    value: { get_attr: [control_plane, floating_ip] }
+  kubeconfig:
+    value: { get_attr: [control_plane, kubeconfig] }

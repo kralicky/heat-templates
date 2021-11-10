@@ -1,0 +1,52 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  name:
+    type: string
+  image:
+    type: string
+  flavor:
+    type: string
+    constraints:
+      - custom_constraint: nova.flavor
+  key_name:
+    type: string
+  network:
+    type: string
+  volumes:
+    type: number
+    default: 0
+  volume_size:
+    type: number
+    default: 32
+  software_config:
+    type: string
+    default: ""
+
+conditions:
+  use_software_config: { not: { equals: [{ get_param: software_config }, ""] } }
+
+resources:
+  node:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: name }
+      flavor: { get_param: flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      networks:
+        - network: { get_param: network }
+      user_data_format: {if: [use_software_config, SOFTWARE_CONFIG]}
+      user_data: {if: [use_software_config, { get_param: software_config }]}
+
+  node_volume:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: volumes }
+      resource_def:
+        type: Custom::NodeVolume
+        properties:
+          size: { get_param: volume_size }
+          node_uuid: { get_resource: node }
+
+          

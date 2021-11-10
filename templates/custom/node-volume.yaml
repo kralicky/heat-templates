@@ -1,0 +1,20 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  node_uuid:
+    type: string
+  size:
+    type: number
+
+resources:
+  volume:
+    type: OS::Cinder::Volume
+    properties:
+      size: { get_param: size }
+      availability_zone: nova
+      volume_type: __DEFAULT__
+  attachment:
+    type: OS::Cinder::VolumeAttachment
+    properties:
+      instance_uuid: { get_param: node_uuid }
+      volume_id: { get_resource: volume }
