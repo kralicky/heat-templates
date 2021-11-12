@@ -38,6 +38,11 @@ resources:
         - network: { get_param: network }
       user_data_format: {if: [use_software_config, SOFTWARE_CONFIG]}
       user_data: {if: [use_software_config, { get_param: software_config }]}
+      tags:
+        - str_replace:
+            template: "stack_id=%id%"
+            params:
+              "%id%": { get_param: OS::stack_id }
 
   node_volume:
     type: OS::Heat::ResourceGroup
@@ -49,4 +54,6 @@ resources:
           size: { get_param: volume_size }
           node_uuid: { get_resource: node }
 
-          
+outputs:
+  OS::stack_id:
+    value: { get_resource: node }

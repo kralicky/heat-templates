@@ -40,6 +40,11 @@ parameters:
   num_vgpu:
     type: number
     default: 1
+  vgpu_flavor:
+    type: string
+    default: v4.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
   dns_nameserver:
     type: string
     description: DNS nameserver to use for private network
@@ -82,8 +87,25 @@ resources:
       flavor: { get_param: agent_flavor }
       key_name: { get_param: key_name }
       network: { get_resource: private_network }
-      volumes: 2
-      volume_size: 32
+      volumes: 1
+      volume_size: 256
+      software_config: { get_resource: kubeadm_worker_config }
+
+  # vGPUs
+  vgpu_group:
+    type: Custom::NodeGroup
+    properties:
+      name:
+        str_replace:
+          template: "%name%-vgpu-%index%"
+          params:
+            "%name%": { get_param: OS::stack_name }
+      count: { get_param: num_vgpu }
+      image: { get_param: agent_image }
+      flavor: { get_param: vgpu_flavor }
+      key_name: { get_param: key_name }
+      network: { get_resource: private_network }
+      volumes: 0
       software_config: { get_resource: kubeadm_worker_config }
 
 outputs:
@@ -91,3 +113,9 @@ outputs:
     value: { get_attr: [control_plane, floating_ip] }
   kubeconfig:
     value: { get_attr: [control_plane, kubeconfig] }
+  worker_ids:
+    value: { get_attr: [agents_group, node_ids] }
+  vgpu_ids:
+    value: { get_attr: [vgpu_group, node_ids] }
+  control_plane_id:
+    value: { get_attr: [control_plane, node_id] }

@@ -127,8 +127,8 @@ resources:
                 - --v=5
             EOF
 
-            kubeadm init --apiserver-advertise-address=0.0.0.0 --apiserver-cert-extra-sans=%floating_ip% --control-plane-endpoint=%floating_ip% --feature-gates=IPv6DualStack=false --pod-network-cidr=10.244.0.0/16 --patches=/tmp/patches
-            KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+            kubeadm init --apiserver-advertise-address=0.0.0.0 --apiserver-cert-extra-sans=%floating_ip% --control-plane-endpoint=%floating_ip% --feature-gates=IPv6DualStack=false --pod-network-cidr=10.244.0.0/16 --service-cidr=10.43.0.0/16 --patches=/tmp/patches
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
 
             wc_notify_token --data $(TOKEN=$(kubeadm token list -o json | jq -r '.token') jq -Mcn '{"status": "SUCCESS", "data": env.TOKEN}')
             wc_notify_kc --data $(KC=$(cat /etc/kubernetes/admin.conf | sed 's|https://.*:6443|https://%floating_ip%:6443|' | base64 -w0) jq -Mcn '{"status": "SUCCESS", "data": env.KC}')
@@ -140,6 +140,8 @@ resources:
             wc_notify_kc: { get_attr: [kubeconfig_handle, curl_cli] }
 
 outputs:
+  node_id:
+    value: { get_resource: control_plane }
   floating_ip: 
     value: { get_attr: [control_plane_floating_ip, floating_ip_address] }
   internal_ip: 

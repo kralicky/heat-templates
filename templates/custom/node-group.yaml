@@ -45,3 +45,7 @@ resources:
           volumes: { get_param: volumes }
           volume_size: { get_param: volume_size }
           software_config: { if: [use_software_config, { get_param: software_config }] }
+
+outputs:
+  node_ids:
+    value: { get_attr: [ group, refs ] }
