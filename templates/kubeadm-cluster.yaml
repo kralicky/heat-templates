@@ -101,7 +101,7 @@ resources:
           params:
             "%name%": { get_param: OS::stack_name }
       count: { get_param: num_vgpu }
-      image: { get_param: agent_image }
+      image: { get_param: vgpu_image }
       flavor: { get_param: vgpu_flavor }
       key_name: { get_param: key_name }
       network: { get_resource: private_network }
