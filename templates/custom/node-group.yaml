@@ -25,6 +25,9 @@ parameters:
   software_config:
     type: string
     default: ""
+  lb_pool:
+    type: string
+    default: ""
 
 conditions:
   use_software_config: { not: { equals: [{ get_param: software_config }, ""] } }
@@ -45,6 +48,7 @@ resources:
           volumes: { get_param: volumes }
           volume_size: { get_param: volume_size }
           software_config: { if: [use_software_config, { get_param: software_config }] }
+          lb_pool: { get_param: lb_pool }
 
 outputs:
   node_ids:

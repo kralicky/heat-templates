@@ -1,0 +1,55 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  name:
+    type: string
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+  image:
+    type: string
+    default: "Ubuntu 21.04"
+  flavor:
+    type: string
+    default: a3.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  network_id:
+    type: string
+  count:
+    type: number
+  floating_ip:
+    type: string
+  token:
+    type: string
+  cert_hash:
+    type: string
+  certificate_key:
+    type: string
+  lb_pool_id:
+    type: string
+
+resources:
+  kubeadm_ha_config:
+    type: Clusters::Kubeadm::Internal::HAControlPlaneConfig
+    properties:
+      control_plane_ip: { get_param: floating_ip }
+      token: { get_param: token }
+      cert_hash: { get_param: cert_hash }
+      certificate_key: { get_param: certificate_key }
+
+  control_plane_nodes:
+    type: Custom::NodeGroup
+    properties:
+      name: 
+        str_replace:
+          template: "%name%-control-plane-%index%"
+          params:
+            "%name%": { get_param: OS::stack_name }
+      count: { get_param: additional_nodes }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      network: { get_param: network_id }
+      lb_pool: { get_param: lb_pool_id }
+      software_config: { get_resource: kubeadm_ha_config }

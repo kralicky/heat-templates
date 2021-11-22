@@ -22,9 +22,14 @@ parameters:
   software_config:
     type: string
     default: ""
+  lb_pool:
+    type: string
+    default: ""
+  
 
 conditions:
   use_software_config: { not: { equals: [{ get_param: software_config }, ""] } }
+  use_lb_pool: { not: { equals: [{ get_param: lb_pool }, ""] } }
 
 resources:
   node:
@@ -53,6 +58,15 @@ resources:
         properties:
           size: { get_param: volume_size }
           node_uuid: { get_resource: node }
+
+  lb_member:
+    type: OS::Octavia::PoolMember
+    condition: use_lb_pool
+    properties:
+      pool: { get_resource: lb_pool }
+      address: { get_attr: [node, first_address] }
+      protocol_port: 6443
+      subnet: { get_param: network }
 
 outputs:
   OS::stack_id:

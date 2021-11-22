@@ -1,0 +1,55 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  control_plane_ip:
+    type: string
+  token:
+    type: string
+  cert_hash:
+    type: string
+  certificate_key:
+    type: string
+
+resources:  
+  kubeadm_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: ungrouped
+      config:
+        str_replace:
+          template: |
+            #!/bin/bash -x
+
+            apt update && apt -y upgrade
+
+            cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+            br_netfilter
+            EOF
+
+            cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+            net.bridge.bridge-nf-call-ip6tables = 1
+            net.bridge.bridge-nf-call-iptables = 1
+            EOF
+
+            sudo sysctl --system
+            modprobe br_netfilter
+            echo 1 > /proc/sys/net/ipv4/ip_forward
+
+            apt install -y apt-transport-https ca-certificates curl jq
+            curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+            echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+            apt update
+            apt install -y containerd
+            apt install -y kubelet kubeadm kubectl
+
+            kubeadm join --control-plane --certificate-key=%certificate_key% --token=$(jq -r '."1"' <<< '%token%') %control_plane_ip%:6443 --discovery-token-ca-cert-hash sha256:$(jq -r '."1"' <<< '%cert_hash%')
+
+          params:
+            "%control_plane_ip%": { get_param: control_plane_ip }
+            "%token%": { get_param: token }
+            "%cert_hash%": { get_param: cert_hash }
+            "%certificate_key%": { get_param: certificate_key }
+
+outputs:
+  OS::stack_id:
+    value: { get_resource: kubeadm_config }

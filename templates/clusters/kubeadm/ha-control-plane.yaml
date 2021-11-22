@@ -1,0 +1,81 @@
+heat_template_version: 2021-04-16
+
+parameters:
+  name:
+    type: string
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+  image:
+    type: string
+    default: "Ubuntu 21.04"
+  flavor:
+    type: string
+    default: a3.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  public_net:
+    type: string
+  network_id:
+    type: string
+  subnet_id:
+    type: string
+  additional_nodes:
+    type: number
+    description: Number of additional control plane nodes to deploy (total nodes - 1)
+    default: 2
+
+resources:
+  certificate_key:
+    type: OS::Heat::RandomString
+    properties:
+      length: 64
+      
+  loadbalancer:
+    type: OS::Octavia::LoadBalancer
+    properties:
+      vip_subnet: { get_param: public_net }
+
+  lb_pool:
+    type: OS::Octavia::Pool
+    properties:
+      name:
+        str_replace:
+          template: "%name%-control-plane"
+          params:
+            "%name%": { get_param: name }
+      loadbalancer: { get_resource: loadbalancer }
+      protocol: HTTPS
+      lb_algorithm: LEAST_CONNECTIONS
+
+  control_plane_init:
+    type: Clusters::Kubeadm::Internal::HAControlPlaneInit
+    properties:
+      name: { get_param: name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      network_id: { get_param: network_id }
+      floating_ip: { get_attr: [loadbalancer, vip_address] }
+      certificate_key: { get_resource: certificate_key }
+      
+  control_plane_join:
+    type: Clusters::Kubeadm::Internal::HAControlPlaneJoin
+    properties:
+      count: { get_param: additional_nodes }
+      name: { get_param: name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      network_id: { get_param: network_id }
+      floating_ip: { get_attr: [loadbalancer, vip_address] }
+      certificate_key: { get_attr: [certificate_key, value] }
+      token: { get_attr: [control_plane_init, token] }
+      cert_hash: { get_attr: [control_plane_init, cert_hash] }
+      lb_pool_id: { get_resource: lb_pool }
+
+outputs:
+  floating_ip: 
+    value: { get_attr: [loadbalancer, vip_address] }
+  kubeconfig:
+    value: { get_attr: [control_plane_init, kubeconfig] }
