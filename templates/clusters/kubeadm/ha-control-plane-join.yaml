@@ -16,9 +16,12 @@ parameters:
       - custom_constraint: nova.flavor
   network_id:
     type: string
+  subnet_id:
+    type: string
+    default: ""
   count:
     type: number
-  floating_ip:
+  control_plane_ip:
     type: string
   token:
     type: string
@@ -33,7 +36,7 @@ resources:
   kubeadm_ha_config:
     type: Clusters::Kubeadm::Internal::HAControlPlaneConfig
     properties:
-      control_plane_ip: { get_param: floating_ip }
+      control_plane_ip: { get_param: control_plane_ip }
       token: { get_param: token }
       cert_hash: { get_param: cert_hash }
       certificate_key: { get_param: certificate_key }
@@ -45,11 +48,12 @@ resources:
         str_replace:
           template: "%name%-control-plane-%index%"
           params:
-            "%name%": { get_param: OS::stack_name }
-      count: { get_param: additional_nodes }
+            "%name%": { get_param: name }
+      count: { get_param: count }
       image: { get_param: image }
       flavor: { get_param: flavor }
       key_name: { get_param: key_name }
-      network: { get_param: network_id }
-      lb_pool: { get_param: lb_pool_id }
+      network_id: { get_param: network_id }
+      subnet_id: { get_param: subnet_id }
+      lb_pool_id: { get_param: lb_pool_id }
       software_config: { get_resource: kubeadm_ha_config }

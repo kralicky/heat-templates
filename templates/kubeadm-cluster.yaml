@@ -18,7 +18,7 @@ parameters:
     default: "Ubuntu 20.04"
   control_plane_flavor:
     type: string
-    default: a3.3xlarge
+    default: a3.2xlarge
     constraints:
       - custom_constraint: nova.flavor
   agent_flavor:
@@ -36,7 +36,7 @@ parameters:
     default: "public"
   num_workers:
     type: number
-    default: 5
+    default: 7
   num_vgpu:
     type: number
     default: 1
@@ -52,6 +52,9 @@ parameters:
     type: string
     description: DNS nameserver to use for private network
     default: "10.200.138.13"
+
+conditions:
+  ha: { get_param: ha }
 
 resources:
   private_network:
@@ -70,7 +73,7 @@ resources:
       network_id: { get_attr: [private_network, network_id] }
       subnet_id: { get_attr: [private_network, subnet_id] }
 
-  control_plane:
+  control_plane_ha:
     type: Clusters::Kubeadm::HAControlPlane
     condition: { get_param: ha }
     properties:
@@ -86,9 +89,9 @@ resources:
   kubeadm_worker_config:
     type: Clusters::Kubeadm::WorkerConfig
     properties:
-      control_plane_ip: { get_attr: [control_plane, internal_ip] }
-      token: { get_attr: [control_plane, token] }
-      cert_hash: { get_attr: [control_plane, cert_hash] }
+      control_plane_ip: { if: [ha, { get_attr: [control_plane_ha, control_plane_ip] }, { get_attr: [control_plane, internal_ip] }] }
+      token: { if: [ha, { get_attr: [control_plane_ha, token] }, { get_attr: [control_plane, token] }] }
+      cert_hash: { if: [ha, { get_attr: [control_plane_ha, cert_hash] }, { get_attr: [control_plane, cert_hash] }] }
 
   # agents
   agents_group:
@@ -103,9 +106,10 @@ resources:
       image: { get_param: agent_image }
       flavor: { get_param: agent_flavor }
       key_name: { get_param: key_name }
-      network: { get_resource: private_network }
+      network_id: { get_attr: [private_network, network_id] }
+      subnet_id: { get_attr: [private_network, subnet_id] }
       volumes: 1
-      volume_size: 256
+      volume_size: 128
       software_config: { get_resource: kubeadm_worker_config }
 
   # vGPUs
@@ -121,18 +125,25 @@ resources:
       image: { get_param: vgpu_image }
       flavor: { get_param: vgpu_flavor }
       key_name: { get_param: key_name }
-      network: { get_resource: private_network }
+      network_id: { get_attr: [private_network, network_id] }
+      subnet_id: { get_attr: [private_network, subnet_id] }
       volumes: 0
       software_config: { get_resource: kubeadm_worker_config }
 
 outputs:
   control_plane_ip:
-    value: { get_attr: [control_plane, floating_ip] }
+    value: { if: [ha, { get_attr: [control_plane_ha, control_plane_ip] }, { get_attr: [control_plane, floating_ip] }] }
+  access_ip:
+    value: { if: [ha, { get_attr: [control_plane_ha, access_ip] }, { get_attr: [control_plane, floating_ip] }] }
   kubeconfig:
-    value: { get_attr: [control_plane, kubeconfig] }
+    value: { if: [ha, { get_attr: [control_plane_ha, kubeconfig] }, { get_attr: [control_plane, kubeconfig] }] }
   worker_ids:
     value: { get_attr: [agents_group, node_ids] }
   vgpu_ids:
     value: { get_attr: [vgpu_group, node_ids] }
   control_plane_id:
-    value: { get_attr: [control_plane, node_id] }
+    value: { if: [ha, { get_attr: [control_plane_ha, node_id] }, { get_attr: [control_plane, node_id] }] }
+  private_network_id:
+    value: { get_attr: [private_network, network_id] }
+  private_subnet_id:
+    value: { get_attr: [private_network, subnet_id] }

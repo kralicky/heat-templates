@@ -14,8 +14,17 @@ parameters:
       - custom_constraint: nova.flavor
   key_name:
     type: string
-  network:
+  network_id:
     type: string
+  subnet_id:
+    type: string
+    default: ""
+  public_network:
+    type: string
+    default: "public"
+  create_floating_ip:
+    type: boolean
+    default: false
   volumes:
     type: number
     default: 0
@@ -25,7 +34,7 @@ parameters:
   software_config:
     type: string
     default: ""
-  lb_pool:
+  lb_pool_id:
     type: string
     default: ""
 
@@ -44,11 +53,14 @@ resources:
           flavor: { get_param: flavor }
           image: { get_param: image }
           key_name: { get_param: key_name }
-          network: { get_param: network }
+          network_id: { get_param: network_id }
+          subnet_id: { get_param: subnet_id }
           volumes: { get_param: volumes }
           volume_size: { get_param: volume_size }
           software_config: { if: [use_software_config, { get_param: software_config }] }
-          lb_pool: { get_param: lb_pool }
+          lb_pool_id: { get_param: lb_pool_id }
+          public_network: { get_param: public_network }
+          create_floating_ip: { get_param: create_floating_ip }
 
 outputs:
   node_ids:

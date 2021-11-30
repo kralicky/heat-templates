@@ -40,9 +40,10 @@ resources:
             echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
             apt update
             apt install -y containerd
+            echo 'KUBELET_EXTRA_ARGS="--v=6 --add-dir-header=true"' > /etc/default/kubelet
             apt install -y kubelet kubeadm kubectl
 
-            kubeadm join --control-plane --certificate-key=%certificate_key% --token=$(jq -r '."1"' <<< '%token%') %control_plane_ip%:6443 --discovery-token-ca-cert-hash sha256:$(jq -r '."1"' <<< '%cert_hash%')
+            kubeadm join %control_plane_ip%:6443 --certificate-key=%certificate_key% --token=$(jq -r '."1"' <<< '%token%') --control-plane --discovery-token-ca-cert-hash sha256:$(jq -r '."1"' <<< '%cert_hash%')
 
           params:
             "%control_plane_ip%": { get_param: control_plane_ip }

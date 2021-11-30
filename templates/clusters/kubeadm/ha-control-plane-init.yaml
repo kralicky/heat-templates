@@ -16,14 +16,22 @@ parameters:
       - custom_constraint: nova.flavor
   network_id:
     type: string
+  public_network:
+    type: string
+    default: "public"
+  subnet_id:
+    type: string
+    default: ""
   certificate_key:
     type: string
-  floating_ip:
+  control_plane_ip:
+    type: string
+  lb_pool_id:
     type: string
 
 resources:     
   control_plane:
-    type: OS::Nova::Server
+    type: Custom::Node
     properties:
       name: 
         str_replace:
@@ -32,9 +40,13 @@ resources:
             "%name%": { get_param: name }
       image: { get_param: image }
       flavor: { get_param: flavor }
+      network_id: { get_param: network_id }
+      subnet_id: { get_param: subnet_id }
       key_name: { get_param: key_name }
-      user_data_format: SOFTWARE_CONFIG
-      user_data: { get_resource: kubeadm_config }
+      software_config: { get_resource: kubeadm_config }
+      lb_pool_id: { get_param: lb_pool_id }
+      public_network: { get_param: public_network }
+      create_floating_ip: true
 
   kubeconfig_handle:
     type: OS::Heat::WaitConditionHandle
@@ -90,43 +102,62 @@ resources:
             echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
             apt update
             apt install -y containerd
+            echo 'KUBELET_EXTRA_ARGS="--v=6 --add-dir-header=true"' > /etc/default/kubelet
             apt install -y kubelet kubeadm kubectl
 
-            mkdir -p /tmp/patches
-            cat <<EOF | tee /tmp/patches/kube-apiserver+strategic.yaml
-            spec:
-              containers:
-              - name: kube-apiserver
-                args:
-                - --v=6
-                - --add-dir-header
-            EOF
-            cat <<EOF | tee /tmp/patches/kube-controller-manager+strategic.yaml
-            spec:
-              containers:
-              - name: kube-controller-manager
-                args:
-                - --v=6
-                - --add-dir-header
-            EOF
-            cat <<EOF | tee /tmp/patches/kube-scheduler+strategic.yaml
-            spec:
-              containers:
-              - name: kube-scheduler
-                args:
-                - --v=6
-                - --add-dir-header
+            cat <<EOF > kubeadm.conf
+            ---
+            apiVersion: kubeadm.k8s.io/v1beta3
+            kind: InitConfiguration
+            certificateKey: %certificate_key%
+            nodeRegistration:
+              criSocket: /var/run/containerd/containerd.sock
+              kubeletExtraArgs:
+                cloud-provider: "external"
+                v: "6"
+                add-dir-header: "true"
+            ---
+            apiVersion: kubeadm.k8s.io/v1beta3
+            kind: ClusterConfiguration
+            kubernetesVersion: v1.22.3
+            controlPlaneEndpoint: %control_plane_ip%:6443
+            certificatesDir: /etc/kubernetes/pki
+            clusterName: kubernetes
+            etcd:
+              local:
+                dataDir: /var/lib/etcd
+            imageRepository: k8s.gcr.io
+            networking:
+              podSubnet: 10.244.0.0/16
+              serviceSubnet: 10.43.0.0/16
+              dnsDomain: cluster.local
+            apiServer:
+              extraArgs: 
+                cloud-provider: "external"
+                v: "6"
+                add-dir-header: "true"
+            controllerManager:
+              extraArgs:
+                cloud-provider: "external"
+                v: "6"
+                add-dir-header: "true"
+            scheduler:
+              extraArgs:
+                v: "6"
+                add-dir-header: "true"
             EOF
 
-            kubeadm init --control-plane-endpoint=%floating_ip%:6443 --feature-gates=IPv6DualStack=false --pod-network-cidr=10.244.0.0/16 --service-cidr=10.43.0.0/16 --patches=/tmp/patches --upload-certs --certificate-key=%certificate_key%
+            kubeadm init --config=kubeadm.conf --upload-certs
             KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system patch daemonset kube-proxy -p '{"spec":{"template":{"spec":{"containers":[{"name":"kube-proxy","args":["--v=6","--add-dir-header"]}]}}}}'
+
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system patch daemonset kube-proxy -p '{"spec":{"template":{"spec":{"containers":[{"name":"kube-proxy","args":["--v=6","--add-dir-header=true"]}]}}}}'
             KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
 
-            wc_notify_token --data $(TOKEN=$(kubeadm token list -o json | jq -r '.token') jq -Mcn '{"status": "SUCCESS", "data": env.TOKEN}')
-            wc_notify_kc --data $(KC=$(cat /etc/kubernetes/admin.conf | sed 's|https://.*:6443|https://%floating_ip%:6443|' | base64 -w0) jq -Mcn '{"status": "SUCCESS", "data": env.KC}')
+            wc_notify_token --data $(TOKEN=$(kubeadm token create) jq -Mcn '{"status": "SUCCESS", "data": env.TOKEN}')
+            wc_notify_kc --data $(KC=$(cat /etc/kubernetes/admin.conf | sed 's|https://.*:6443|https://%control_plane_ip%:6443|' | base64 -w0) jq -Mcn '{"status": "SUCCESS", "data": env.KC}')
             wc_notify_cert_hash --data $(HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //') jq -Mcn '{"status": "SUCCESS", "data": env.HASH}')
           params:
-            "%floating_ip%": { get_param: floating_ip }
+            "%control_plane_ip%": { get_param: control_plane_ip }
             "%certificate_key%": { get_param: certificate_key }
             wc_notify_token: { get_attr: [token_handle, curl_cli] }
             wc_notify_cert_hash: { get_attr: [cert_hash_handle, curl_cli] }
@@ -141,3 +172,7 @@ outputs:
     value: { get_attr: [cert_hash_wc, data] }
   kubeconfig:
     value: { get_attr: [kubeconfig_wc, data] }
+  internal_ip:
+    value: { get_attr: [control_plane, first_address] }
+  access_ip:
+    value: { get_attr: [control_plane, floating_ip_address] }

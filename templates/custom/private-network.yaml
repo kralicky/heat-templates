@@ -6,8 +6,9 @@ parameters:
 
 resources:
   private_net:
-    type: OS::Neutron::Net
+    type: OS::Neutron::ProviderNet
     properties:
+      network_type: vxlan
       name: { get_param: OS::stack_name }
   private_subnet:
     type: OS::Neutron::Subnet
