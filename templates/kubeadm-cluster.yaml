@@ -51,7 +51,7 @@ parameters:
   dns_nameserver:
     type: string
     description: DNS nameserver to use for private network
-    default: "10.200.138.13"
+    default: "10.200.128.5"
 
 conditions:
   ha: { get_param: ha }

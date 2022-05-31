@@ -11,10 +11,16 @@ parameters:
     type: string
     description: Name of image to use for servers
     default: "Ubuntu 20.04"
-  flavor:
+  control_plane_flavor:
     type: string
-    description: Flavor to use for servers
+    description: Flavor to use for control plane nodes
     default: a3.xlarge
+    constraints:
+      - custom_constraint: nova.flavor
+  agent_flavor:
+    type: string
+    description: Flavor to use for agent nodes
+    default: a3.2xlarge
     constraints:
       - custom_constraint: nova.flavor
   public_net:
@@ -53,7 +59,7 @@ parameters:
   dns_nameserver:
     type: string
     description: DNS nameserver to use for private network
-    default: "10.200.138.13"
+    default: "10.200.128.5"
 
 resources:
   # network
@@ -91,7 +97,7 @@ resources:
           params:
             name: { get_param: OS::stack_name }
       image: { get_param: image }
-      flavor: { get_param: flavor }
+      flavor: { get_param: control_plane_flavor }
       key_name: { get_param: key_name }
       networks:
         - port: { get_resource: control_plane_port }
@@ -116,7 +122,7 @@ resources:
       resource_def:
         type: OS::Nova::Server
         properties: &agent_properties
-          flavor: { get_param: flavor }
+          flavor: { get_param: agent_flavor }
           image: { get_param: image }
           key_name: { get_param: key_name }
           networks:
@@ -153,9 +159,10 @@ resources:
         str_replace:
           template: |
             #!/bin/bash -x
-            curl -sfL https://get.k3s.io | INSTALL_K3S_COMMIT=702fe24afe3f08f96ebc167313c20c0339a5510f sh -s - server \
+            curl -sfL https://get.k3s.io | sh -s - server \
               --token=$token --write-kubeconfig-mode=644 --tls-san=$control_plane_ip \
               --kube-scheduler-arg=v=2 --log=/var/log/k3s.log --alsologtostderr
+            sleep 5
             kubeconfig="$(cat /etc/rancher/k3s/k3s.yaml | base64 -w0)"
             echo "{\"status\": \"SUCCESS\", \"data\": \"${kubeconfig}\"}" > /tmp/response
             wc_notify -d @/tmp/response
@@ -173,7 +180,7 @@ resources:
         str_replace:
           template: |
             #!/bin/bash -x
-            curl -sfL https://get.k3s.io | INSTALL_K3S_COMMIT=702fe24afe3f08f96ebc167313c20c0339a5510f sh -s - agent \
+            curl -sfL https://get.k3s.io | sh -s - agent \
               --server=https://$control_plane_ip:6443 --kubelet-arg=v=2 --log=/var/log/k3s.log \
               --alsologtostderr --token=$token
           params:
